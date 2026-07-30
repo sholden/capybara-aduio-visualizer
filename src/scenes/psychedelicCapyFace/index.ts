@@ -9,6 +9,9 @@ import {
   FEATURES,
   IMAGE_HEIGHT,
   IMAGE_WIDTH,
+  SPRING_DAMPING,
+  SPRING_MAX_STEP,
+  SPRING_STIFFNESS,
   type FeatureDriver,
 } from './features'
 
@@ -34,7 +37,7 @@ export class PsychedelicCapyFace implements CapyScene {
   }
 
   readonly params: readonly ParamSpec[] = [
-    { key: 'swell', label: 'Feature swell', min: 0, max: 2.5, step: 0.05, default: 1 },
+    { key: 'swell', label: 'Feature swell', min: 0, max: 3, step: 0.05, default: 1.15 },
     { key: 'dome', label: 'Head relief', min: 0, max: 1.5, step: 0.05, default: 1 },
     { key: 'chroma', label: 'Chromatic split', min: 0, max: 3, step: 0.05, default: 1 },
     { key: 'complexity', label: 'Fractal glow', min: 0.2, max: 1.5, step: 0.05, default: 1 },
@@ -62,8 +65,9 @@ export class PsychedelicCapyFace implements CapyScene {
 
   private time = 0
   private hue = 0
-  /** Smoothed per-feature drive values, so bulges ease rather than snap. */
+  /** Spring state per feature: current drive and its velocity. */
   private drives = new Float32Array(FEATURES.length)
+  private velocities = new Float32Array(FEATURES.length)
 
   async load(ctx: SceneContext): Promise<void> {
     const photo = ctx.assets.textures.face
@@ -185,12 +189,20 @@ export class PsychedelicCapyFace implements CapyScene {
       punch: frame.sinceBeat,
     }
 
-    // Asymmetric smoothing: swell fast, relax slowly. Instant response reads as
-    // flicker at 60fps; the slow release is what makes it look elastic.
-    for (let i = 0; i < FEATURES.length; i++) {
-      const target = source[FEATURES[i]!.driver] * swell
-      const k = target > this.drives[i] ? 0.35 : 0.08
-      this.drives[i] += (target - this.drives[i]) * k
+    // Underdamped spring per feature, substepped for stability. Each one
+    // overshoots its target and wobbles back rather than easing into place,
+    // which is what makes the swelling read as cartoon rubber.
+    let remaining = frame.dt
+    while (remaining > 0) {
+      const step = Math.min(remaining, SPRING_MAX_STEP)
+      remaining -= step
+      for (let i = 0; i < FEATURES.length; i++) {
+        const target = source[FEATURES[i]!.driver] * swell
+        const accel =
+          (target - this.drives[i]) * SPRING_STIFFNESS - this.velocities[i] * SPRING_DAMPING
+        this.velocities[i] += accel * step
+        this.drives[i] += this.velocities[i] * step
+      }
     }
 
     const hu = this.headMaterial.uniforms
@@ -198,7 +210,7 @@ export class PsychedelicCapyFace implements CapyScene {
     let peak = 0
     for (let i = 0; i < FEATURES.length; i++) {
       drive[i] = this.drives[i]
-      peak = Math.max(peak, this.drives[i])
+      peak = Math.max(peak, Math.abs(this.drives[i]))
     }
 
     hu.uTime!.value = this.time

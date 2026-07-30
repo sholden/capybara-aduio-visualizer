@@ -38,21 +38,35 @@ export interface Feature {
 
 export const FEATURES: readonly Feature[] = [
   // Ears sit high and wide; the beat makes them flap out.
-  { name: 'earL', u: 0.247, v: 0.222, radius: 0.085, driver: 'punch', swell: 0.42, pop: 0.30 },
-  { name: 'earR', u: 0.753, v: 0.222, radius: 0.085, driver: 'punch', swell: 0.42, pop: 0.30 },
+  { name: 'earL', u: 0.247, v: 0.222, radius: 0.090, driver: 'punch', swell: 0.72, pop: 0.58 },
+  { name: 'earR', u: 0.753, v: 0.222, radius: 0.090, driver: 'punch', swell: 0.72, pop: 0.58 },
 
   // Eyes on the top end so hats and cymbals make them bug out.
-  { name: 'eyeL', u: 0.316, v: 0.282, radius: 0.055, driver: 'high', swell: 0.55, pop: 0.34 },
-  { name: 'eyeR', u: 0.690, v: 0.282, radius: 0.055, driver: 'high', swell: 0.55, pop: 0.34 },
+  { name: 'eyeL', u: 0.316, v: 0.282, radius: 0.060, driver: 'high', swell: 0.95, pop: 0.66 },
+  { name: 'eyeR', u: 0.690, v: 0.282, radius: 0.060, driver: 'high', swell: 0.95, pop: 0.66 },
 
   // The whole snout swells on the low end — the biggest, slowest motion.
-  { name: 'nose', u: 0.485, v: 0.396, radius: 0.105, driver: 'bass', swell: 0.34, pop: 0.42 },
+  { name: 'nose', u: 0.485, v: 0.396, radius: 0.110, driver: 'bass', swell: 0.58, pop: 0.78 },
 
-  { name: 'nostrilL', u: 0.418, v: 0.396, radius: 0.040, driver: 'lowMid', swell: 0.60, pop: 0.20 },
-  { name: 'nostrilR', u: 0.553, v: 0.399, radius: 0.040, driver: 'lowMid', swell: 0.60, pop: 0.20 },
+  { name: 'nostrilL', u: 0.418, v: 0.396, radius: 0.044, driver: 'lowMid', swell: 0.95, pop: 0.44 },
+  { name: 'nostrilR', u: 0.553, v: 0.399, radius: 0.044, driver: 'lowMid', swell: 0.95, pop: 0.44 },
 
-  { name: 'mouth', u: 0.481, v: 0.590, radius: 0.060, driver: 'mid', swell: 0.50, pop: 0.24 },
+  { name: 'mouth', u: 0.481, v: 0.590, radius: 0.065, driver: 'mid', swell: 0.90, pop: 0.52 },
 ]
+
+/**
+ * Spring constants for the feature drives.
+ *
+ * Underdamped on purpose: critical damping for this stiffness would be
+ * 2·sqrt(STIFFNESS) ≈ 26, and sitting well below it makes each feature
+ * overshoot its target and wobble back. That overshoot is the whole difference
+ * between "the eye gets bigger" and "the eye boings out" — plain exponential
+ * smoothing can only ever ease toward a target and never past it.
+ */
+export const SPRING_STIFFNESS = 170
+export const SPRING_DAMPING = 11
+/** Integration is unstable at large steps; substep anything longer than this. */
+export const SPRING_MAX_STEP = 1 / 120
 
 /**
  * Region kept fully opaque regardless of brightness.

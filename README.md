@@ -109,9 +109,23 @@ Two details worth knowing before editing it:
   nostrils and mouth are near-black too, so `FACE_CORE` is an ellipse that
   forces them opaque. **If you enlarge it past the fur it becomes a black halo
   around the head**, which is exactly what it looks like when it's wrong.
-- The Mandelbox camera orbits at a distance rather than flying inward. Moving it
-  much closer puts it inside the structure, at which point every ray hits
-  immediately and the frame smears into one flat surface.
+- The Mandelbox is **repeated on a lattice** (`CELL` in `mandelbox.glsl.ts`).
+  A single copy is a finite object, so however the camera is aimed the frame
+  eventually runs out of fractal and goes black; tiling it guarantees geometry
+  in every direction. The flight wraps into one cell with `mod`, which is exact
+  because the scene is periodic, and stops the coordinate growing without bound
+  over a multi-hour run.
+- Camera sway must stay **bounded**. An earlier version yawed by a term linear
+  in time, rotating a little further every second until the fractal had drifted
+  off frame — the original symptom that motivated the lattice.
+- Surfaces are shaded from a real normal (central differences on the distance
+  estimator). Without it the fractal goes flat wherever the camera passes close
+  to a copy, since orbit-trap and depth alone carry no form.
+- Feature drives are **underdamped springs**, not smoothing. Exponential
+  smoothing can only ease toward a target; the overshoot and wobble past it is
+  what makes the bulges read as cartoon rubber. Both shader stages clamp the
+  resulting drive — past a swell of 1.0 the UV scale factor passes through zero
+  and the feature turns inside out.
 
 The source image is 474×632, which is soft when the head is large on a 4K
 display. Dropping in a higher-resolution capybara portrait is the single biggest

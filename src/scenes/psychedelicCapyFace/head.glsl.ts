@@ -57,7 +57,9 @@ export const HEAD_VERTEX = /* glsl */ `
       float f = featureFalloff(uv, i);
       // Smootherstep on the falloff keeps the bulge rounded instead of conical.
       f = f * f * (3.0 - 2.0 * f);
-      pop += f * uFeatureDrive[i] * uFeaturePop[i];
+      // Bounded so a hard spring overshoot can't launch vertices through the
+      // camera, while still leaving plenty of travel for a dramatic pop.
+      pop += f * clamp(uFeatureDrive[i], -0.7, 2.2) * uFeaturePop[i];
     }
     pos.z += pop;
     vPop = pop;
@@ -91,7 +93,14 @@ export const HEAD_FRAGMENT = /* glsl */ `
     for (int i = 0; i < ${COUNT}; i++) {
       float f = featureFalloff(uv, i);
       f = f * f * (3.0 - 2.0 * f);
-      float amount = f * uFeatureDrive[i] * uFeatureSwell[i];
+
+      // The drive springs past its target and can undershoot below zero, so
+      // clamp both ends: at 1.0 the scale factor hits zero and the feature
+      // collapses to a point, and past it the UVs mirror and the eye turns
+      // inside out. The negative end is left open a little on purpose — a
+      // brief shrink before the bulge is good squash-and-stretch.
+      float amount = clamp(f * uFeatureDrive[i] * uFeatureSwell[i], -0.55, 0.88);
+
       vec2 delta = out_ - uFeaturePos[i];
       // Pulling samples inward stretches the centre outward — the feature
       // appears to grow without moving the surrounding face.
