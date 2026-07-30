@@ -18,6 +18,23 @@ export const CAPY_COUNT = 10
 const CATCH_RANGE = 1.2
 
 /**
+ * Separation the pair snap to when the straw comes out, in world units.
+ *
+ * Catch range is deliberately short, but the bodies are CAPY_WIDTH across, so
+ * at the moment of contact the two are overlapping and there is physically no
+ * room between a mouth and a rear for the straw to span. Snapping to a fixed
+ * gap — chaser directly behind, both facing the same way, matched height — is
+ * what lets the straw actually connect the two ends every time instead of
+ * landing at whatever angle the chase happened to end at.
+ *
+ * Derived from the sprite: the straw tip reaches ~1.1 local units ahead of the
+ * chaser's centre and the victim's rear sits ~0.5 behind its own, and one local
+ * unit is CAPY_WIDTH. Slightly under the sum, so the tip stays inserted even as
+ * the victim inflates and its rear pushes further back.
+ */
+const CONTACT_GAP = 2.5
+
+/**
  * How long a chaser must stay on its target before the catch lands.
  *
  * Without this, catches trigger the instant two capybaras brush past each
@@ -36,12 +53,20 @@ const GRAB_TIME = 0.30
  */
 const ESCALATION_START = 10
 const ESCALATION_RATE = 0.08
-/** Eyes-wide, body-swelling, spinning phase, in seconds. */
-const STUN_TIME = 1.5
+/**
+ * Victim's full stun: a frozen contact hold, then a spin-up.
+ *
+ * The hold covers the whole straw animation so the pair stay locked together
+ * in the pose while the eyes and body balloon; the remainder is the spin before
+ * the wings come out.
+ */
+const STUN_TIME = 2.6
+/** Frozen portion of the stun. Matches BLOW_TIME so both sides unfreeze together. */
+const HOLD_TIME = 2.0
 /** Wings-out drifting-away phase. Long and slow, so the exit is savoured. */
 const FLY_TIME = 3.4
 /** How long the straw stays out. Exported so the sprite can animate against it. */
-export const BLOW_TIME = 1.1
+export const BLOW_TIME = 2.0
 /**
  * Pause on the winner before the next round starts. Comfortably longer than a
  * flight, so a late victim finishes leaving before the level resets.
@@ -250,23 +275,42 @@ export class Simulation {
 
     switch (capy.state) {
       case 'active':
+        if (capy.blowTimer > 0) {
+          // Holding the straw in: frozen in the pose alongside the victim.
+          capy.vx = 0
+          capy.vy = 0
+          break
+        }
         if (chase) this.think(capy, dt, beat, energy)
         this.integrate(capy, dt)
         break
-      case 'stunned':
+      case 'stunned': {
         capy.timer -= dt
-        // Eyes bug out, then it starts spinning faster and faster.
-        capy.eyeScale = Math.min(1, capy.eyeScale + dt * 5)
-        // Inflate from the air being blown in, then hold.
-        capy.puff = Math.min(1, capy.puff + dt * 2.4)
-        capy.spin += dt * (5 + (STUN_TIME - capy.timer) * 7)
-        capy.vx *= 0.86
-        this.integrate(capy, dt)
+        const elapsed = STUN_TIME - capy.timer
+
+        // Eyes and body swell over the course of the hold.
+        capy.eyeScale = Math.min(1, capy.eyeScale + dt / (HOLD_TIME * 0.55))
+        capy.puff = Math.min(1, capy.puff + dt / (HOLD_TIME * 0.7))
+
+        if (elapsed < HOLD_TIME) {
+          // Frozen at the moment of contact — no gravity, no drift. Both
+          // capybaras hang in the pose while the air goes in, which is what
+          // makes the hit land instead of flashing past.
+          capy.vx = 0
+          capy.vy = 0
+          capy.squash = 1 + Math.sin(elapsed * 38) * 0.05 * capy.puff
+        } else {
+          capy.spin += dt * (5 + (elapsed - HOLD_TIME) * 14)
+          capy.vx *= 0.86
+          this.integrate(capy, dt)
+        }
+
         if (capy.timer <= 0) {
           capy.state = 'flying'
           capy.timer = FLY_TIME
         }
         break
+      }
       case 'flying':
         capy.timer -= dt
         capy.wings = Math.min(1, capy.wings + dt * 3)
@@ -513,6 +557,9 @@ export class Simulation {
       let locked = false
       for (const victim of this.capys) {
         if (victim.index === chaser.index || victim.state !== 'active') continue
+        // Whoever is mid-blow is untouchable until the straw comes out — being
+        // boofed while frozen in your own boofing pose would read as a bug.
+        if (victim.blowTimer > 0) continue
 
         const dx = victim.x - chaser.x
         const dy = victim.y - chaser.y
@@ -536,9 +583,36 @@ export class Simulation {
         victim.eyeScale = 0
         victim.puff = 0
         victim.spin = 0
-        victim.vx = Math.sign(dx) * 3
-        victim.vy = 4
-        victim.facing = (Math.sign(dx) || 1) as 1 | -1
+        // No knockback: the pair hold the pose together while the air goes in.
+        victim.vx = 0
+        victim.vy = 0
+
+        // Snap into the pose. Both face the same way so the chaser's mouth is
+        // behind the victim's rear, and the correction is split between them so
+        // neither visibly teleports.
+        const dir = chaser.facing
+        victim.facing = dir
+        const midX = (chaser.x + victim.x) * 0.5
+        const midY = (chaser.y + victim.y) * 0.5
+        let chaserX = midX - dir * CONTACT_GAP * 0.5
+        let victimX = midX + dir * CONTACT_GAP * 0.5
+
+        // Nudge the pair as a unit if the pose overhangs the arena edge.
+        // Clamping each independently squeezed them together against a wall and
+        // the straw ended up buried in the victim rather than spanning the gap.
+        const maxX = WORLD_WIDTH - CAPY_WIDTH
+        const leftMost = Math.min(chaserX, victimX)
+        const rightMost = Math.max(chaserX, victimX)
+        const shift = leftMost < 0 ? -leftMost : rightMost > maxX ? maxX - rightMost : 0
+        chaserX += shift
+        victimX += shift
+
+        chaser.x = clamp(chaserX, 0, maxX)
+        victim.x = clamp(victimX, 0, maxX)
+        chaser.y = midY
+        victim.y = midY
+        chaser.vx = 0
+        chaser.vy = 0
 
         chaser.blowTimer = BLOW_TIME
         // Long enough that a chaser cannot chain straight into the next
@@ -568,6 +642,10 @@ export class Simulation {
   private escalation(): number {
     return 1 + Math.max(0, this.roundTimer - ESCALATION_START) * ESCALATION_RATE
   }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return value < min ? min : value > max ? max : value
 }
 
 /** Separate stream from level generation so spawn jitter varies independently. */

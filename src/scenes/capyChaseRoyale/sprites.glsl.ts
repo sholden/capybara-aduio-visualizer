@@ -53,16 +53,22 @@ export const CAPY_FRAGMENT = /* glsl */ `
     p.x *= mix(1.0, uSquash, 0.6);
 
     // --- wings, drawn behind the body ------------------------------------
+    // Set high on the back and wide, so they clear the silhouette. An earlier
+    // version tucked them small and low inside the body outline, where the body
+    // simply drew over them and they were barely visible at all.
     float wingMask = 0.0;
+    float wingEdge = 0.0;
     if (uWings > 0.001) {
-      float flap = sin(uTime * 22.0) * 0.5 + 0.5;
+      float flap = sin(uTime * 15.0) * 0.5 + 0.5;
       vec2 w = p;
       w.x = abs(w.x);
-      vec2 wp = w - vec2(0.16, 0.10 + flap * 0.10);
-      // Squeeze into a feather-ish ellipse that beats up and down.
-      wp.y /= mix(0.45, 0.85, flap);
-      wp *= mix(3.2, 2.4, uWings);
-      wingMask = 1.0 - step(0.32, length(wp));
+      vec2 wp = w - vec2(0.20, 0.32 + flap * 0.16);
+      // Beating changes the ellipse's height, so it reads as flapping rather
+      // than sliding up and down.
+      vec2 radius = vec2(0.34, mix(0.09, 0.19, flap)) * uWings;
+      float wd = length(wp / max(radius, vec2(0.001)));
+      wingMask = 1.0 - step(1.0, wd);
+      wingEdge = (1.0 - step(1.22, wd)) - wingMask;
     }
 
     // --- body -------------------------------------------------------------
@@ -84,9 +90,11 @@ export const CAPY_FRAGMENT = /* glsl */ `
     float straw = 1e9;
     float puffBurst = 1e9;
     if (uBlow > 0.001) {
-      // Jab out fast, hold, then withdraw.
+      // Jab out fast, hold, then withdraw. Reaches ~1.1 local units ahead at
+      // full extension, which is what CONTACT_GAP in the simulation is sized
+      // against — long enough to stay inserted as the victim inflates.
       float extend = smoothstep(0.0, 0.25, 1.0 - uBlow) * smoothstep(0.0, 0.30, uBlow);
-      float len = 0.10 + extend * 0.16;
+      float len = 0.12 + extend * 0.27;
       straw = sdRoundBox(p - vec2(0.52 + len * 0.5, 0.02), vec2(len, 0.038), 0.030);
 
       // Three puffs travelling away from the tip on a loop.
@@ -128,12 +136,16 @@ export const CAPY_FRAGMENT = /* glsl */ `
     float eyeRimMask = eyeMask - eyeRing;
 
     float alpha = max(max(bodyMask, outline), max(max(wingMask, strawMask), puffMask));
+    alpha = max(alpha, wingEdge);
     // The huge eye can extend past the body silhouette.
     alpha = max(alpha, eyeMask * uEyeScale);
     if (alpha < 0.5) discard;
 
     vec3 outColor = col;
-    if (wingMask > 0.5 && bodyMask < 0.5) outColor = vec3(0.95, 0.96, 1.0);
+    // Wings sit behind the body, with their own ink edge so they stay legible
+    // against a bright background.
+    if (wingEdge > 0.5 && bodyMask < 0.5) outColor = INK;
+    if (wingMask > 0.5 && bodyMask < 0.5) outColor = vec3(0.96, 0.97, 1.0);
     if (outline > 0.5 && bodyMask < 0.5) outColor = INK;
 
     if (bodyMask > 0.5 || (eyeMask > 0.5 && uEyeScale > 0.2)) {

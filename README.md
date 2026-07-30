@@ -119,8 +119,16 @@ The tuning constants are load-bearing and were each found by measurement:
 - Beat hops are deliberately much smaller than navigation jumps: a full jump
   hangs ~0.9s, longer than the gap between beats at any normal tempo.
 
-Current pacing is ~14s per round with no stalls across 100+ simulated rounds.
-If you change any of the above, re-run the headless check before trusting it.
+- `CONTACT_GAP` — catch range is shorter than a capybara is wide, so at the
+  moment of contact the pair overlap and there is no room for a straw between a
+  mouth and a rear. They snap into the pose: blower behind, both facing the same
+  way, matched height. The gap is sized against the sprite's straw reach, so
+  changing one means re-deriving the other.
+
+Current pacing is ~19s per round with no stalls across 100+ simulated rounds.
+If you change any of the above, re-run the headless check before trusting it —
+the alignment is verifiable too (height mismatch should be exactly 0 and the gap
+exactly CONTACT_GAP on every frame a straw is out).
 
 ### Psychedelic Capy Face
 
