@@ -83,9 +83,8 @@ Scenes must release every GPU resource in `dispose()`. Rotation runs for hours;
 sprite work) and GLTF models, declared per-scene via an `assets` manifest and
 preloaded by the director. Put files under `public/assets/<sceneId>/`.
 
-All three current scenes are procedural and need no files, so **the asset loader
-is written and typechecked but not yet exercised against real assets.** The first
-scene that declares a manifest will be the real test.
+Psychedelic Capy Face exercises the texture path. The GLTF path is written and
+typechecked but still unexercised — no scene loads a model yet.
 
 ## Scenes
 
@@ -94,6 +93,29 @@ scene that declares a manifest will be the real test.
 | Capy Blob Disco | Cartoon 2D | SDF capybaras half-submerged at sunset. Squash on beat, bass-driven bobbing. |
 | Pixel Capy Parade | Pixel art | Rendered at 320×180 with nearest-neighbour upscaling and quantised to a 9-colour palette with Bayer dithering. Two-frame waddle steps on the beat. |
 | Hot Spring Soak | 3D | Lit geometry, custom water shader with beat ripple rings, steam particles. |
+| Psychedelic Capy Face | 3D + photo | A photographed capybara face on a displaced surface over a raymarched Mandelbox. Each eye, ear, nostril, the nose and the mouth swell and pop independently, each driven by a different frequency band. |
+
+### Psychedelic Capy Face
+
+The eight facial anchors live in `src/scenes/psychedelicCapyFace/features.ts`,
+measured off `capy-face.jpg` with v counted from the **top** of the image. That
+table is the only image-specific thing in the scene — swapping in a different
+capybara photo means re-measuring those eight points and the `FACE_CORE`
+ellipse, and nothing else.
+
+Two details worth knowing before editing it:
+
+- The photo is shot on black, so the background keys out on luminance. The eyes,
+  nostrils and mouth are near-black too, so `FACE_CORE` is an ellipse that
+  forces them opaque. **If you enlarge it past the fur it becomes a black halo
+  around the head**, which is exactly what it looks like when it's wrong.
+- The Mandelbox camera orbits at a distance rather than flying inward. Moving it
+  much closer puts it inside the structure, at which point every ray hits
+  immediately and the frame smears into one flat surface.
+
+The source image is 474×632, which is soft when the head is large on a 4K
+display. Dropping in a higher-resolution capybara portrait is the single biggest
+available quality win for this scene.
 
 The capybara silhouette is defined once in `src/shaders/lib.ts` and shared by both
 2D scenes; the 3D one is built from primitives in

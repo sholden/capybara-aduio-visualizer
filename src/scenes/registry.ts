@@ -2,6 +2,7 @@ import type { SceneRegistration } from '@/core/types'
 import { CapyBlobDisco } from './capyBlobDisco'
 import { HotSpringSoak } from './hotSpringSoak'
 import { PixelCapyParade } from './pixelCapyParade'
+import { PsychedelicCapyFace } from './psychedelicCapyFace'
 
 /**
  * Every scene in the show. Adding one means adding a single entry here —
@@ -26,5 +27,11 @@ export const SCENE_REGISTRY: readonly SceneRegistration[] = [
     name: 'Hot Spring Soak',
     tags: ['3d', 'procedural'],
     create: () => new HotSpringSoak(),
+  },
+  {
+    id: 'psychedelicCapyFace',
+    name: 'Psychedelic Capy Face',
+    tags: ['3d', 'fractal', 'photo'],
+    create: () => new PsychedelicCapyFace(),
   },
 ]
