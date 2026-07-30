@@ -19,6 +19,9 @@ import {
 /** The raymarch is the frame budget; render it small and upscale. */
 const FRACTAL_SCALE = 0.5
 
+/** Radians per second at spin = 1, i.e. one revolution roughly every 18s. */
+const SPIN_RATE = 0.35
+
 const PHOTO_URL = '/assets/psychedelicCapyFace/capy-face.jpg'
 
 const UPSCALE_FRAGMENT = /* glsl */ `
@@ -69,6 +72,7 @@ export class PsychedelicCapyFace implements CapyScene {
     { key: 'complexity', label: 'Fractal glow', min: 0.2, max: 1.5, step: 0.05, default: 1 },
     { key: 'headScale', label: 'Head size', min: 0.5, max: 1.6, step: 0.02, default: 1 },
     { key: 'calm', label: 'Flash damping', min: 0, max: 1, step: 0.05, default: 0.55 },
+    { key: 'spin', label: 'Spin speed', min: 0, max: 3, step: 0.05, default: 1 },
   ]
 
   // Fractal pass: fullscreen quad into a half-res target.
@@ -98,6 +102,13 @@ export class PsychedelicCapyFace implements CapyScene {
 
   private time = 0
   private hue = 0
+  /**
+   * Accumulated spin angle.
+   *
+   * Integrated rather than derived from elapsed time, so changing the speed
+   * mid-show eases into the new rate instead of snapping to a different angle.
+   */
+  private spinAngle = 0
   /** Steers the camera around the fractal rather than through it. */
   private flight = new FlightPath()
   /** Spring state per feature: current drive and its velocity. */
@@ -296,7 +307,10 @@ export class PsychedelicCapyFace implements CapyScene {
     // Lazy sway, plus a kick on each beat.
     this.headMesh.rotation.y = Math.sin(this.time * 0.23) * 0.16
     this.headMesh.rotation.x = Math.sin(this.time * 0.17) * 0.09
-    this.headMesh.rotation.z = Math.sin(this.time * 0.13) * 0.05 + frame.sinceBeat * 0.03
+    // Negative because Three.js follows the right-hand rule: positive rotation
+    // about +Z reads counter-clockwise to a viewer in front of it.
+    this.spinAngle -= frame.dt * (params.spin ?? 1) * SPIN_RATE
+    this.headMesh.rotation.z = this.spinAngle + frame.sinceBeat * 0.03
     this.headMesh.position.y = Math.sin(this.time * 0.31) * 0.06 + frame.bass * 0.08
 
     // Fold parameters first: the flight steering needs the same shape the
