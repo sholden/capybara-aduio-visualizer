@@ -94,6 +94,33 @@ typechecked but still unexercised — no scene loads a model yet.
 | Pixel Capy Parade | Pixel art | Rendered at 320×180 with nearest-neighbour upscaling and quantised to a 9-colour palette with Bayer dithering. Two-frame waddle steps on the beat. |
 | Hot Spring Soak | 3D | Lit geometry, custom water shader with beat ripple rings, steam particles. |
 | Psychedelic Capy Face | 3D + photo | A photographed capybara face on a displaced surface over a raymarched Mandelbox. Each eye, ear, nostril, the nose and the mouth swell and pop independently, each driven by a different frequency band. |
+| Capy Chase Royale | Pixel + sim | Ten coloured capybaras chase each other around a procedurally generated platformer. A catch means a straw to the rear; the victim's eyes balloon, it inflates, spins, grows wings and drifts off. Last one standing wins the round. |
+
+### Capy Chase Royale
+
+A real simulation, not an animation — physics, chase AI, elimination states and
+round lifecycle live in `simulation.ts`, entirely separate from rendering. It is
+headless-testable, which is how the pacing was tuned: run it for simulated
+minutes and measure round durations rather than watching and guessing.
+
+Two rendering layers: a smooth full-resolution liquid background, and the game
+itself drawn at 640×360 and nearest-upscaled over it. The contrast between the
+two is the look.
+
+The tuning constants are load-bearing and were each found by measurement:
+
+- `GRAB_TIME` — a chaser must stay on its target, not brush past it. Without it
+  a round of ten collapsed in under six seconds.
+- Chase speed escalation is **capped**. Scaling it freely made the final duel
+  cross the catch window faster than the grab takes, so escalation prevented the
+  very catches it exists to force. Reach and grab leniency carry it instead.
+- `landLock` — minimum ground contact before jumping again. Without it
+  capybaras spent 86% of the round airborne and the crowd appeared to float.
+- Beat hops are deliberately much smaller than navigation jumps: a full jump
+  hangs ~0.9s, longer than the gap between beats at any normal tempo.
+
+Current pacing is ~14s per round with no stalls across 100+ simulated rounds.
+If you change any of the above, re-run the headless check before trusting it.
 
 ### Psychedelic Capy Face
 

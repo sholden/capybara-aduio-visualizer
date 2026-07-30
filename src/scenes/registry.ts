@@ -3,6 +3,7 @@ import { CapyBlobDisco } from './capyBlobDisco'
 import { HotSpringSoak } from './hotSpringSoak'
 import { PixelCapyParade } from './pixelCapyParade'
 import { PsychedelicCapyFace } from './psychedelicCapyFace'
+import { CapyChaseRoyale } from './capyChaseRoyale'
 
 /**
  * Every scene in the show. Adding one means adding a single entry here —
@@ -27,6 +28,12 @@ export const SCENE_REGISTRY: readonly SceneRegistration[] = [
     name: 'Hot Spring Soak',
     tags: ['3d', 'procedural'],
     create: () => new HotSpringSoak(),
+  },
+  {
+    id: 'capyChaseRoyale',
+    name: 'Capy Chase Royale',
+    tags: ['pixel', '2d', 'game'],
+    create: () => new CapyChaseRoyale(),
   },
   {
     id: 'psychedelicCapyFace',
