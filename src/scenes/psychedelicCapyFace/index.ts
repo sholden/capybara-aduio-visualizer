@@ -3,6 +3,7 @@ import type { AudioFrame, CapyScene, ParamSpec, SceneContext } from '@/core/type
 import { FULLSCREEN_VERTEX } from '@/shaders/lib'
 import { MANDELBOX_FRAGMENT } from './mandelbox.glsl'
 import { HEAD_FRAGMENT, HEAD_VERTEX } from './head.glsl'
+import { FlightPath, foldParameters } from './flightPath'
 import {
   ASPECT_CORRECT,
   FACE_CORE,
@@ -27,6 +28,31 @@ const UPSCALE_FRAGMENT = /* glsl */ `
   void main() { gl_FragColor = texture2D(uSource, vUv); }
 `
 
+/**
+ * Temporal blend against the previous frame.
+ *
+ * The blend rate is *adaptive*: the larger the change at a pixel, the more
+ * slowly it is allowed to move. That specifically targets full-frame colour
+ * flashes — the thing that made this scene uncomfortable to watch — while
+ * leaving ordinary gentle motion responsive. A fixed rate would either fail to
+ * damp the flashes or smear everything into mush.
+ */
+const BLEND_FRAGMENT = /* glsl */ `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D uCurrent;
+  uniform sampler2D uHistory;
+  uniform float uBlend;
+
+  void main() {
+    vec3 current = texture2D(uCurrent, vUv).rgb;
+    vec3 history = texture2D(uHistory, vUv).rgb;
+    float change = length(current - history);
+    float rate = mix(uBlend, uBlend * 0.28, smoothstep(0.20, 0.85, change));
+    gl_FragColor = vec4(mix(history, current, rate), 1.0);
+  }
+`
+
 export class PsychedelicCapyFace implements CapyScene {
   readonly id = 'psychedelicCapyFace'
   readonly name = 'Psychedelic Capy Face'
@@ -42,6 +68,7 @@ export class PsychedelicCapyFace implements CapyScene {
     { key: 'chroma', label: 'Chromatic split', min: 0, max: 3, step: 0.05, default: 1 },
     { key: 'complexity', label: 'Fractal glow', min: 0.2, max: 1.5, step: 0.05, default: 1 },
     { key: 'headScale', label: 'Head size', min: 0.5, max: 1.6, step: 0.02, default: 1 },
+    { key: 'calm', label: 'Flash damping', min: 0, max: 1, step: 0.05, default: 0.55 },
   ]
 
   // Fractal pass: fullscreen quad into a half-res target.
@@ -50,7 +77,13 @@ export class PsychedelicCapyFace implements CapyScene {
   private fractalTarget!: THREE.WebGLRenderTarget
   private fractalMaterial!: THREE.ShaderMaterial
 
-  // Upscale pass: draws the fractal target across the frame.
+  // Temporal blend: ping-pong pair holding the smoothed result.
+  private blendScene = new THREE.Scene()
+  private blendMaterial!: THREE.ShaderMaterial
+  private history: THREE.WebGLRenderTarget[] = []
+  private historyIndex = 0
+
+  // Upscale pass: draws the smoothed fractal across the frame.
   private upscaleScene = new THREE.Scene()
   private upscaleMaterial!: THREE.ShaderMaterial
 
@@ -65,6 +98,8 @@ export class PsychedelicCapyFace implements CapyScene {
 
   private time = 0
   private hue = 0
+  /** Steers the camera around the fractal rather than through it. */
+  private flight = new FlightPath()
   /** Spring state per feature: current drive and its velocity. */
   private drives = new Float32Array(FEATURES.length)
   private velocities = new Float32Array(FEATURES.length)
@@ -102,6 +137,9 @@ export class PsychedelicCapyFace implements CapyScene {
         uPunch: { value: 0 },
         uHue: { value: 0 },
         uComplexity: { value: 1 },
+        uCameraPos: { value: new THREE.Vector3() },
+        uScale: { value: -2.05 },
+        uMinRadius2: { value: 0.25 },
       },
       vertexShader: FULLSCREEN_VERTEX,
       fragmentShader: MANDELBOX_FRAGMENT,
@@ -110,8 +148,34 @@ export class PsychedelicCapyFace implements CapyScene {
     })
     this.fractalScene.add(new THREE.Mesh(this.quadGeometry, this.fractalMaterial))
 
+    const makeHistory = () => {
+      const target = new THREE.WebGLRenderTarget(
+        this.fractalTarget.width,
+        this.fractalTarget.height,
+        { depthBuffer: false, generateMipmaps: false },
+      )
+      target.texture.colorSpace = THREE.SRGBColorSpace
+      target.texture.minFilter = THREE.LinearFilter
+      target.texture.magFilter = THREE.LinearFilter
+      return target
+    }
+    this.history = [makeHistory(), makeHistory()]
+
+    this.blendMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uCurrent: { value: this.fractalTarget.texture },
+        uHistory: { value: this.history[0]!.texture },
+        uBlend: { value: 0.5 },
+      },
+      vertexShader: FULLSCREEN_VERTEX,
+      fragmentShader: BLEND_FRAGMENT,
+      depthTest: false,
+      depthWrite: false,
+    })
+    this.blendScene.add(new THREE.Mesh(this.quadGeometry, this.blendMaterial))
+
     this.upscaleMaterial = new THREE.ShaderMaterial({
-      uniforms: { uSource: { value: this.fractalTarget.texture } },
+      uniforms: { uSource: { value: this.history[0]!.texture } },
       vertexShader: FULLSCREEN_VERTEX,
       fragmentShader: UPSCALE_FRAGMENT,
       depthTest: false,
@@ -177,7 +241,9 @@ export class PsychedelicCapyFace implements CapyScene {
   update(frame: AudioFrame, params: Record<string, number>): void {
     this.time += frame.dt
     // Hue drifts continuously and jumps on beats, so colour never settles.
-    this.hue += frame.dt * 0.05 + (frame.beat ? 0.11 : 0)
+    // Gentler than it was: a fast hue cycle plus a big per-beat jump was a
+    // major contributor to the strobing feel.
+    this.hue += frame.dt * 0.03 + (frame.beat ? 0.04 : 0)
 
     const swell = params.swell ?? 1
     const source: Record<FeatureDriver, number> = {
@@ -233,6 +299,12 @@ export class PsychedelicCapyFace implements CapyScene {
     this.headMesh.rotation.z = Math.sin(this.time * 0.13) * 0.05 + frame.sinceBeat * 0.03
     this.headMesh.position.y = Math.sin(this.time * 0.31) * 0.06 + frame.bass * 0.08
 
+    // Fold parameters first: the flight steering needs the same shape the
+    // shader is about to draw.
+    const fold = foldParameters(this.time, frame.bass, frame.mid)
+    this.flight.advance(frame.dt, fold.scale, fold.minRadius2)
+    const camera = this.flight.state
+
     const fu = this.fractalMaterial.uniforms
     fu.uTime!.value = this.time
     fu.uBass!.value = frame.bass
@@ -242,6 +314,13 @@ export class PsychedelicCapyFace implements CapyScene {
     fu.uPunch!.value = frame.sinceBeat
     fu.uHue!.value = this.hue
     fu.uComplexity!.value = params.complexity ?? 1
+    fu.uScale!.value = fold.scale
+    fu.uMinRadius2!.value = fold.minRadius2
+    ;(fu.uCameraPos!.value as THREE.Vector3).set(camera.x, camera.y, camera.z)
+
+    // Lower `calm` means more temporal smoothing. Exposed because how much
+    // flashing is comfortable is a viewer preference, not a fixed constant.
+    this.blendMaterial.uniforms.uBlend!.value = 0.22 + (params.calm ?? 1) * 0.30
   }
 
   render(renderer: THREE.WebGLRenderer): void {
@@ -249,6 +328,16 @@ export class PsychedelicCapyFace implements CapyScene {
 
     renderer.setRenderTarget(this.fractalTarget)
     renderer.render(this.fractalScene, this.quadCamera)
+
+    // Blend against last frame's smoothed result, writing into the other half
+    // of the ping-pong pair.
+    const read = this.history[this.historyIndex]!
+    const write = this.history[1 - this.historyIndex]!
+    this.blendMaterial.uniforms.uHistory!.value = read.texture
+    renderer.setRenderTarget(write)
+    renderer.render(this.blendScene, this.quadCamera)
+    this.historyIndex = 1 - this.historyIndex
+    this.upscaleMaterial.uniforms.uSource!.value = write.texture
 
     renderer.setRenderTarget(previous)
     // Two passes into one target: the upscale clears, the head must not.
@@ -267,17 +356,22 @@ export class PsychedelicCapyFace implements CapyScene {
     const w = Math.max(1, Math.round(width * FRACTAL_SCALE))
     const h = Math.max(1, Math.round(height * FRACTAL_SCALE))
     this.fractalTarget.setSize(w, h)
+    for (const target of this.history) target.setSize(w, h)
     ;(this.fractalMaterial.uniforms.uResolution!.value as THREE.Vector2).set(w, h)
   }
 
   dispose(): void {
     this.fractalTarget.dispose()
+    for (const target of this.history) target.dispose()
+    this.history = []
     this.quadGeometry.dispose()
     this.headGeometry.dispose()
     this.fractalMaterial.dispose()
+    this.blendMaterial.dispose()
     this.upscaleMaterial.dispose()
     this.headMaterial.dispose()
     this.fractalScene.clear()
+    this.blendScene.clear()
     this.upscaleScene.clear()
     this.headScene.clear()
   }

@@ -1,3 +1,5 @@
+import { CELL } from './flightPath'
+
 /**
  * Raymarched Mandelbox.
  *
@@ -5,6 +7,10 @@
  * runs a folding loop per march step, so it is by far the most expensive thing
  * in the app and full-res 4K is not worth the frame budget. At half res the
  * softness is invisible against a fractal this busy.
+ *
+ * CELL is interpolated from flightPath.ts rather than duplicated: the camera
+ * steering evaluates this same field on the CPU, and if the two ever disagreed
+ * the steering would be dodging obstacles that aren't where they're drawn.
  */
 export const MANDELBOX_FRAGMENT = /* glsl */ `
   precision highp float;
@@ -19,23 +25,22 @@ export const MANDELBOX_FRAGMENT = /* glsl */ `
   uniform float uPunch;
   uniform float uHue;
   uniform float uComplexity;
+  uniform vec3  uCameraPos;
+  uniform float uScale;
+  uniform float uMinRadius2;
 
   const int   FOLD_ITERATIONS = 9;
   const int   MARCH_STEPS     = 78;
   const float MIN_DIST        = 0.0006;
-  const float MAX_DIST        = 20.0;
+  const float MAX_DIST        = 30.0;
 
   /**
-   * Edge length of the repeating cell.
-   *
-   * A single Mandelbox is a finite object, so however the camera is aimed the
-   * frame eventually runs out of fractal and goes black. Folding position into
-   * a repeating cell tiles it through space in every direction, so there is
-   * always geometry to hit no matter where the camera drifts. Slightly smaller
-   * than twice the structure's radius, so neighbouring copies overlap rather
-   * than leaving gaps between them.
+   * Edge length of the repeating cell — see flightPath.ts, which owns this
+   * value. A single Mandelbox is finite, so however the camera is aimed the
+   * frame eventually runs out of fractal and goes black; tiling it guarantees
+   * geometry in every direction.
    */
-  const float CELL = 6.4;
+  const float CELL = ${CELL.toFixed(4)};
 
   // --- Mandelbox distance estimator ---------------------------------------
   // Box fold, then sphere fold, then scale — repeated. The scale factor is the
@@ -111,23 +116,17 @@ export const MANDELBOX_FRAGMENT = /* glsl */ `
     vec2 uv = (vUv - 0.5) * 2.0;
     uv.x *= uResolution.x / uResolution.y;
 
-    // Audio drives the fold parameters. Ranges kept inside the region where
-    // the Mandelbox stays a recognisable solid rather than dissolving to dust.
-    float scale = -2.05 + uBass * 0.26 + sin(uTime * 0.09) * 0.08;
-    float minRadius2 = 0.25 + uMid * 0.12;
+    // Fold parameters and camera position both come from the CPU. The steering
+    // in flightPath.ts has to evaluate this exact distance field to keep the
+    // camera clear of surfaces, so deriving either independently here would let
+    // the two describe slightly different shapes.
+    float scale = uScale;
+    float minRadius2 = uMinRadius2;
 
-    // Endless flight through the lattice. Repetition means we never fly out of
-    // the structure, so the camera can travel forever without the frame
-    // emptying — and it never needs to aim back at any particular copy.
-    vec3 ro = vec3(
-      sin(uTime * 0.06) * 1.3,
-      cos(uTime * 0.045) * 0.9,
-      // Wrapped into a single cell. The scene is exactly periodic in CELL, so
-      // this renders identically to flying forever — but the coordinate never
-      // grows, which keeps float precision intact over a multi-hour run
-      // instead of degrading into jitter.
-      mod(-uTime * 0.42, CELL)
-    );
+    // Endless flight through the lattice, already steered around anything it
+    // would otherwise fly into. Repetition means we never run out of structure,
+    // and the standoff distance means we never end up inside it.
+    vec3 ro = uCameraPos;
     vec3 rd = normalize(vec3(uv, -1.7));
 
     // Sway must be bounded. An earlier version yawed by a term linear in time,
@@ -164,7 +163,7 @@ export const MANDELBOX_FRAGMENT = /* glsl */ `
       // Accumulated proximity gives the volumetric haze between surfaces,
       // which is most of the psychedelic look. Kept tight — a broader falloff
       // saturated over 78 steps and washed the whole frame to flat gold.
-      glow += exp(-d * 42.0) * 0.030;
+      glow += exp(-d * 42.0) * 0.038;
 
       if (d < MIN_DIST) {
         hit = true;
@@ -196,7 +195,10 @@ export const MANDELBOX_FRAGMENT = /* glsl */ `
       float back = max(dot(n, rimDir), 0.0);
       float fresnel = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
 
-      col *= 0.22 + 0.78 * diffuse + 0.30 * back;
+      // Generous ambient floor. Wider cells mean more surfaces face away from
+      // both lights, and at 0.22 those went almost black — reintroducing the
+      // dead regions the lattice was meant to eliminate.
+      col *= 0.40 + 0.62 * diffuse + 0.32 * back;
       col += palette(trap * 0.5 + uTime * 0.04, uHue + 0.5) * fresnel * (0.35 + uHigh * 0.4);
 
       // Cheap ambient occlusion from how far the ray got before hitting.
@@ -207,14 +209,14 @@ export const MANDELBOX_FRAGMENT = /* glsl */ `
       // depth rather than as holes.
       float band = dot(rd, vec3(0.35, 0.55, 0.25)) * 0.5 + length(uv) * 0.22;
       vec3 nebula = palette(band + uTime * 0.02, uHue + 0.35);
-      col = nebula * (0.20 + uLevel * 0.25);
+      col = nebula * (0.38 + uLevel * 0.30);
     }
 
     col += palette(glow * 0.65 + uTime * 0.05, uHue) * glow * (0.55 + uLevel * 0.85);
     col += vec3(0.9, 0.5, 1.0) * uPunch * glow * 0.35;
 
     // Fade the far field so the head always has something dark to sit against.
-    col *= mix(1.0, 0.28, smoothstep(0.50, 1.0, depth));
+    col *= mix(1.0, 0.55, smoothstep(0.60, 1.0, depth));
     col *= 0.55 + uComplexity * 0.45;
 
     // Push saturation and contrast — the raw march reads washed out, and this

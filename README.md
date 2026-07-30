@@ -121,6 +121,18 @@ Two details worth knowing before editing it:
 - Surfaces are shaded from a real normal (central differences on the distance
   estimator). Without it the fractal goes flat wherever the camera passes close
   to a copy, since orbit-trap and depth alone carry no form.
+- **The camera must never enter the geometry.** At point-blank range every pixel
+  hits within a step or two, the orbit trap varies wildly between neighbouring
+  pixels, and the palette turns that into full-screen strobing — genuinely
+  unpleasant, and a photosensitivity concern. `flightPath.ts` mirrors the
+  distance estimator on the CPU (once per frame, for one point) and steers the
+  camera to keep a guaranteed standoff. It also searches for an open corridor at
+  startup: routing through the origin meant ~5 seconds embedded in a solid every
+  time the scene appeared.
+- `CELL` was chosen by measurement. At 6.4 the roomiest point in the whole
+  lattice had only ~2.0 units of clearance and 29% of the volume was open, so
+  the camera permanently hugged a surface. At 9 there is roughly triple the
+  headroom. If you change it, re-check that a corridor still exists.
 - Feature drives are **underdamped springs**, not smoothing. Exponential
   smoothing can only ease toward a target; the overshoot and wobble past it is
   what makes the bulges read as cartoon rubber. Both shader stages clamp the
